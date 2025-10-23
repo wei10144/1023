@@ -1,108 +1,214 @@
 // =================================================================
 // 步驟一：模擬成績數據接收
 // -----------------------------------------------------------------
-
-
-// let scoreText = "成績分數: " + finalScore + "/" + maxScore;
-// 確保這是全域變數
-let finalScore = 0; 
+let finalScore = 0;
 let maxScore = 0;
-let scoreText = ""; // 用於 p5.js 繪圖的文字
-
+let scoreText = "等待成績中..."; // 初始提示文字
 
 window.addEventListener('message', function (event) {
-    // 執行來源驗證...
-    // ...
     const data = event.data;
     
     if (data && data.type === 'H5P_SCORE_RESULT') {
-        
-        // !!! 關鍵步驟：更新全域變數 !!!
-        finalScore = data.score; // 更新全域變數
+        finalScore = data.score;
         maxScore = data.maxScore;
         scoreText = `最終成績分數: ${finalScore}/${maxScore}`;
         
         console.log("新的分數已接收:", scoreText); 
         
-        // ----------------------------------------
-        // 關鍵步驟 2: 呼叫重新繪製 (見方案二)
-        // ----------------------------------------
-        if (typeof redraw === 'function') {
-            redraw(); 
+        // 當收到新分數時，重新觸發繪製循環
+        if (typeof loop === 'function') {
+            loop(); 
         }
     }
 }, false);
 
 
 // =================================================================
-// 步驟二：使用 p5.js 繪製分數 (在網頁 Canvas 上顯示)
+// 步驟二：p5.js 繪製與煙火特效
 // -----------------------------------------------------------------
 
+let fireworks = []; // 儲存所有煙火的陣列
+let particles = []; // 儲存所有爆炸粒子的陣列
+
+// 煙火類別 (Class)
+class Firework {
+    constructor() {
+        // 從底部中央往上發射
+        this.firework = new Particle(random(width), height, true);
+        this.exploded = false;
+        this.particles = [];
+    }
+
+    update() {
+        if (!this.exploded) {
+            this.firework.applyForce(createVector(0, -0.2)); // 模擬上升力
+            this.firework.update();
+            // 當煙火速度變為向上時引爆 (到達頂點)
+            if (this.firework.vel.y >= 0) {
+                this.exploded = true;
+                this.explode();
+            }
+        }
+        
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            this.particles[i].update();
+            if (this.particles[i].done()) {
+                this.particles.splice(i, 1);
+            }
+        }
+    }
+
+    explode() {
+        // 產生 100 個爆炸粒子
+        for (let i = 0; i < 100; i++) {
+            const p = new Particle(this.firework.pos.x, this.firework.pos.y, false);
+            this.particles.push(p);
+        }
+    }
+
+    show() {
+        if (!this.exploded) {
+            this.firework.show();
+        }
+        for (let p of this.particles) {
+            p.show();
+        }
+    }
+    
+    done() {
+        return this.exploded && this.particles.length === 0;
+    }
+}
+
+// 粒子類別 (可用於煙火彈或爆炸後的火花)
+class Particle {
+    constructor(x, y, isFirework) {
+        this.pos = createVector(x, y);
+        this.isFirework = isFirework;
+        this.lifespan = 255; // 生命週期，用於淡出效果
+        
+        if (this.isFirework) {
+            // 煙火彈的初始速度
+            this.vel = createVector(0, random(-18, -12));
+        } else {
+            // 爆炸粒子的速度
+            this.vel = p5.Vector.random2D().mult(random(2, 10));
+        }
+        this.acc = createVector(0, 0); // 加速度
+    }
+
+    applyForce(force) {
+        this.acc.add(force);
+    }
+
+    update() {
+        if (!this.isFirework) {
+            this.vel.mult(0.9); // 模擬空氣阻力
+            this.lifespan -= 4; // 生命週期衰減
+        }
+        this.vel.add(this.acc);
+        this.pos.add(this.vel);
+        this.acc.mult(0); // 重設加速度
+        // 模擬重力
+        this.applyForce(createVector(0, 0.2));
+    }
+
+    show() {
+        if (!this.isFirework) {
+            strokeWeight(2);
+            stroke(random(100, 255), random(100, 255), random(100, 255), this.lifespan);
+        } else {
+            strokeWeight(4);
+            stroke(255, 255, 0); // 上升的火光
+        }
+        point(this.pos.x, this.pos.y);
+    }
+    
+    done() {
+        return this.lifespan < 0;
+    }
+}
+
+
 function setup() { 
-    // ... (其他設置)
     createCanvas(windowWidth / 2, windowHeight / 2); 
-    background(255); 
-    noLoop(); // 如果您希望分數只有在改變時才繪製，保留此行
+    background(0); 
+    // 移除 noLoop() 以啟用動畫
 } 
 
-// score_display.js 中的 draw() 函數片段
-
 function draw() { 
-    background(255); // 清除背景
+    // 使用帶有透明度的黑色背景，創造拖影效果
+    background(0, 0, 0, 25); 
 
-    // 計算百分比
-    let percentage = (finalScore / maxScore) * 100;
+    let percentage = 0;
+    if (maxScore > 0) {
+        percentage = (finalScore / maxScore) * 100;
+    }
 
-    textSize(80); 
-    textAlign(CENTER);
-    
     // -----------------------------------------------------------------
-    // A. 根據分數區間改變文本顏色和內容 (畫面反映一)
+    // 根據分數顯示不同內容
     // -----------------------------------------------------------------
-    if (percentage >= 90) {
-        // 滿分或高分：顯示鼓勵文本，使用鮮豔顏色
-        fill(0, 200, 50); // 綠色 [6]
+    if (percentage >= 100) {
+        // 全對時，觸發煙火特效
+        if (random(1) < 0.05) { // 控制煙火生成頻率
+            fireworks.push(new Firework());
+        }
+        
+        for (let i = fireworks.length - 1; i >= 0; i--) {
+            fireworks[i].update();
+            fireworks[i].show();
+            if (fireworks[i].done()) {
+                fireworks.splice(i, 1);
+            }
+        }
+        
+        // 可以在煙火背景上顯示祝賀語
+        textSize(60);
+        textAlign(CENTER, CENTER);
+        fill(255, 223, 0, 200); // 金色
+        text("太棒了！滿分！", width / 2, height / 2);
+
+    } else if (percentage >= 90) {
+        fill(0, 200, 50);
+        textSize(80); 
+        textAlign(CENTER);
         text("恭喜！優異成績！", width / 2, height / 2 - 50);
+        fill(50);
+        textSize(50);
+        text(`得分: ${finalScore}/${maxScore}`, width / 2, height / 2 + 50);
         
     } else if (percentage >= 60) {
-        // 中等分數：顯示一般文本，使用黃色 [6]
         fill(255, 181, 35); 
+        textSize(80); 
+        textAlign(CENTER);
         text("成績良好，請再接再厲。", width / 2, height / 2 - 50);
+        fill(50);
+        textSize(50);
+        text(`得分: ${finalScore}/${maxScore}`, width / 2, height / 2 + 50);
         
     } else if (percentage > 0) {
-        // 低分：顯示警示文本，使用紅色 [6]
         fill(200, 0, 0); 
+        textSize(80); 
+        textAlign(CENTER);
         text("需要加強努力！", width / 2, height / 2 - 50);
+        fill(50);
+        textSize(50);
+        text(`得分: ${finalScore}/${maxScore}`, width / 2, height / 2 + 50);
         
     } else {
         // 尚未收到分數或分數為 0
         fill(150);
+        textSize(50); 
+        textAlign(CENTER, CENTER);
         text(scoreText, width / 2, height / 2);
     }
-
-    // 顯示具體分數
-    textSize(50);
-    fill(50);
-    text(`得分: ${finalScore}/${maxScore}`, width / 2, height / 2 + 50);
     
-    
-    // -----------------------------------------------------------------
-    // B. 根據分數觸發不同的幾何圖形反映 (畫面反映二)
-    // -----------------------------------------------------------------
-    
-    if (percentage >= 90) {
-        // 畫一個大圓圈代表完美 [7]
-        fill(0, 200, 50, 150); // 帶透明度
-        noStroke();
-        circle(width / 2, height / 2 + 150, 150);
-        
-    } else if (percentage >= 60) {
-        // 畫一個方形 [4]
-        fill(255, 181, 35, 150);
-        rectMode(CENTER);
-        rect(width / 2, height / 2 + 150, 150, 150);
+    // 清理舊粒子 (如果需要)
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].update();
+        particles[i].show();
+        if (particles[i].done()) {
+            particles.splice(i, 1);
+        }
     }
-    
-    // 如果您想要更複雜的視覺效果，還可以根據分數修改線條粗細 (strokeWeight) 
-    // 或使用 sin/cos 函數讓圖案的動畫效果有所不同 [8, 9]。
 }
